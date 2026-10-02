@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#14101f">
+<meta name="description" content="写真から顔のバランスを解析して顔面偏差値を算出するエンタメ診断。画像は端末内で処理され、どこにも送信されません。">
+<title>顔面偏差値診断</title>
+<style>
+:root {
+  --bg: #14101f;
+  --surface: #1f1930;
+  --surface-2: #2a2240;
+  --border: #3a3056;
+  --text: #f1ecfa;
+  --muted: #a99cc4;
+  --accent: #ff6fa8;
+  --accent-2: #8b7bff;
+  --good: #4ade80;
+  --warn: #fbbf24;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif;
+  background: radial-gradient(1200px 600px at 50% -200px, #2d1f4f 0%, var(--bg) 60%) fixed, var(--bg);
+  color: var(--text); min-height: 100vh; line-height: 1.6;
+}
+.wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+header { text-align: center; margin: 12px 0 28px; }
+header h1 {
+  font-size: clamp(1.8rem, 6vw, 2.8rem); font-weight: 800; letter-spacing: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+header p { color: var(--muted); font-size: 0.92rem; margin-top: 6px; }
+.privacy {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 12px;
+  font-size: 0.78rem; color: var(--good); background: rgba(74,222,128,0.08);
+  border: 1px solid rgba(74,222,128,0.3); padding: 4px 12px; border-radius: 999px;
+}
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 20px;
+}
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+
+/* Upload */
+.drop {
+  border: 2px dashed var(--border); border-radius: 14px; padding: 36px 16px;
+  text-align: center; cursor: pointer; transition: all .15s;
+}
+.drop:hover, .drop.over { border-color: var(--accent); background: rgba(255,111,168,0.05); }
+.drop .icon { font-size: 2.6rem; }
+.drop strong { display: block; margin: 6px 0 2px; }
+.drop small { color: var(--muted); }
+.btns { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.btn {
+  flex: 1; min-width: 140px; padding: 12px 16px; border-radius: 12px; border: none;
+  font-size: 0.95rem; font-weight: 700; cursor: pointer; color: #fff;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: transform .1s, opacity .15s;
+}
+.btn:active { transform: scale(0.98); }
+.btn.sub { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.tips { margin-top: 14px; font-size: 0.8rem; color: var(--muted); }
+.tips li { margin-left: 1.2em; }
+
+/* Stage */
+.stage { position: relative; border-radius: 12px; overflow: hidden; background: #000; }
+.stage canvas, .stage video { display: block; width: 100%; height: auto; }
+.stage .overlay-msg {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 12px; background: rgba(20,16,31,0.75); font-size: 0.95rem;
+}
+.spinner {
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 4px solid var(--border); border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.scanline {
+  position: absolute; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  box-shadow: 0 0 16px var(--accent); animation: scan 1.4s ease-in-out infinite;
+}
+@keyframes scan { 0% { top: 0; } 50% { top: calc(100% - 3px); } 100% { top: 0; } }
+.toggle { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--muted); margin-top: 10px; }
+
+/* Result */
+.score-box { text-align: center; padding: 8px 0 4px; }
+.score-label { color: var(--muted); font-size: 0.85rem; letter-spacing: 2px; }
+.score {
+  font-size: clamp(3.6rem, 14vw, 5.2rem); font-weight: 900; line-height: 1.1;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  font-variant-numeric: tabular-nums;
+}
+.rank {
+  display: inline-block; margin-top: 4px; padding: 4px 16px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--border); font-weight: 700;
+}
+.percentile { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
+.comment { margin-top: 14px; font-size: 0.9rem; background: var(--surface-2); border-radius: 10px; padding: 12px; }
+.bars { margin-top: 18px; display: grid; gap: 10px; }
+.bar-row { font-size: 0.85rem; }
+.bar-row .top { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.bar-row .top span:last-child { font-weight: 700; font-variant-numeric: tabular-nums; }
+.bar { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.bar > div { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent-2), var(--accent)); width: 0; transition: width 1s ease-out; }
+#radar { display: block; width: 100%; max-width: 320px; margin: 16px auto 0; }
+.warn { margin-top: 12px; font-size: 0.8rem; color: var(--warn); }
+details { margin-top: 16px; font-size: 0.82rem; color: var(--muted); }
+details summary { cursor: pointer; color: var(--text); }
+details table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+details td { padding: 4px 6px; border-bottom: 1px solid var(--border); }
+details td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.hidden { display: none !important; }
+footer { margin-top: 32px; text-align: center; font-size: 0.75rem; color: var(--muted); }
+footer p + p { margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>顔面偏差値診断</h1>
+    <p>AIが顔の468点を検出し、対称性・黄金比・バランスから偏差値を算出します</p>
+    <div class="privacy">🔒 画像は端末内だけで処理・サーバーへ送信しません</div>
+  </header>
+
+  <div class="grid">
+    <!-- Left: input / preview -->
+    <section class="card">
+      <div id="inputArea">
+        <label class="drop" id="drop">
+          <div class="icon">📷</div>
+          <strong>写真を選択 / ドロップ</strong>
+          <small>JPEG・PNG など（正面の顔写真）</small>
+          <input type="file" id="fileInput" accept="image/*" hidden>
+        </label>
+        <div class="btns">
+          <button class="btn sub" id="cameraBtn">カメラで撮影</button>
+        </div>
+        <ul class="tips">
+          <li>正面を向き、顔全体が写っている写真を選んでください</li>
+          <li>前髪・メガネ・マスクで顔が隠れていると精度が下がります</li>
+          <li>明るい場所で、無表情に近い写真がおすすめです</li>
+        </ul>
+      </div>
+
+      <div id="cameraArea" class="hidden">
+        <div class="stage"><video id="video" playsinline muted></video></div>
+        <div class="btns">
+          <button class="btn" id="shootBtn">撮影する</button>
+          <button class="btn sub" id="cancelCamBtn">キャンセル</button>
+        </div>
+      </div>
+
+      <div id="previewArea" class="hidden">
+        <div class="stage">
+          <canvas id="canvas"></canvas>
+          <div class="overlay-msg hidden" id="busy">
+            <div class="scanline"></div>
+            <div class="spinner"></div>
+            <div id="busyText">解析中…</div>
+          </div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="meshToggle" checked> 解析ポイントを表示</label>
+        <div class="btns">
+          <button class="btn sub" id="retryBtn">別の写真で診断</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right: result -->
+    <section class="card" id="resultCard">
+      <div id="placeholder" style="text-align:center;color:var(--muted);padding:40px 0;">
+        <div style="font-size:3rem;">✨</div>
+        <p>写真をアップロードすると<br>ここに結果が表示されます</p>
+      </div>
+      <div id="result" class="hidden">
+        <div class="score-box">
+          <div class="score-label">あなたの顔面偏差値</div>
+          <div class="score" id="score">--</div>
+          <div class="rank" id="rank"></div>
+          <div class="percentile" id="percentile"></div>
+        </div>
+        <canvas id="radar" width="640" height="560"></canvas>
+        <div class="bars" id="bars"></div>
+        <div class="comment" id="comment"></div>
+        <div class="warn hidden" id="warn"></div>
+        <div class="btns">
+          <button class="btn" id="shareBtn">結果をXでシェア</button>
+          <button class="btn sub" id="saveBtn">結果画像を保存</button>
+        </div>
+        <details>
+          <summary>計測値の詳細</summary>
+          <table id="detail"></table>
+        </details>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <p>※ 本診断はエンターテインメントです。顔の幾何学的なバランスのみを機械的に評価したもので、人の魅力や価値を示すものではありません。</p>
+    <p>顔検出: MediaPipe Face Landmarker（ブラウザ内で実行）</p>
+  </footer>
+</div>
+
+<script type="module">
+const MP_VERSION = "0.10.14";
+const MP_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
+const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+
+const $ = (id) => document.getElementById(id);
+const canvas = $("canvas");
+const ctx = canvas.getContext("2d");
+
+let landmarkerPromise = null;
+let currentImage = null;
+let currentLandmarks = null;
+let lastResult = null;
+
+function getLandmarker() {
+  if (!landmarkerPromise) {
+    landmarkerPromise = (async () => {
+      const { FaceLandmarker, FilesetResolver } = await import(`${MP_BASE}/vision_bundle.mjs`);
+      const fileset = await FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
+      const opts = (delegate) => ({
+        baseOptions: { modelAssetPath: MODEL_URL, delegate },
+        runningMode: "IMAGE",
+        numFaces: 1,
+      });
+      try {
+        return await FaceLandmarker.createFromOptions(fileset, opts("GPU"));
+      } catch {
+        return await FaceLandmarker.createFromOptions(fileset, opts("CPU"));
+      }
+    })();
+    landmarkerPromise.catch(() => { landmarkerPromise = null; });
+  }
+  return landmarkerPromise;
+}
+// Start downloading the model early so the first analysis is faster.
+getLandmarker().catch(() => {});
+
+/* ---------------- Geometry ---------------- */
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const scale = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+const norm = (a) => Math.hypot(a[0], a[1], a[2]);
+const unit = (a) => scale(a, 1 / norm(a));
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+// Landmark indices (MediaPipe face mesh). "R" = subject's right (image left).
+const L = {
+  top: 10, chin: 152, glabella: 9, noseTip: 1, subnasale: 2,
+  cheekR: 234, cheekL: 454, jawR: 172, jawL: 397,
+  eyeOutR: 33, eyeInR: 133, eyeInL: 362, eyeOutL: 263,
+  lidUpR: 159, lidLoR: 145, lidUpL: 386, lidLoL: 374,
+  browInR: 107, browInL: 336,
+  alarR: 129, alarL: 358,
+  mouthR: 61, mouthL: 291,
+  lipTop: 0, lipUpIn: 13, lipLoIn: 14, lipBottom: 17,
+};
+const SYM_PAIRS = [
+  [33, 263], [133, 362], [159, 386], [145, 374], [70, 300], [105, 334], [107, 336],
+  [129, 358], [61, 291], [40, 270], [91, 321], [234, 454], [93, 323], [132, 361],
+  [58, 288], [172, 397], [50, 280], [116, 345], [21, 251],
+];
+const MIDLINE = [10, 151, 9, 8, 168, 6, 197, 195, 5, 4, 1, 2, 164, 0, 17, 18, 200, 199, 175, 152];
+
+// Projects 3D landmarks onto a face-aligned frame to cancel head roll and most yaw/pitch.
+function frontalize(lms, w, h) {
+  const P = lms.map((p) => [p.x * w, p.y * h, p.z * w]);
+  const center = scale([
+    P[L.cheekR][0] + P[L.cheekL][0], P[L.cheekR][1] + P[L.cheekL][1], P[L.cheekR][2] + P[L.cheekL][2],
+  ], 0.5);
+  const u = unit(sub(P[L.cheekL], P[L.cheekR]));
+  const v0 = sub(P[L.top], P[L.chin]);
+  const v = unit(sub(v0, scale(u, dot(v0, u))));
+  const n = cross(u, v);
+  return P.map((p) => {
+    const d = sub(p, center);
+    return { x: dot(d, u), y: dot(d, v), z: dot(d, n) };
+  });
+}
+const d2 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+// Score 0–100 that decays as `value` moves away from `ideal` (tolerance = relative width).
+const gauss = (value, ideal, tol) => 100 * Math.exp(-(((value - ideal) / (ideal * tol)) ** 2));
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+
+function measure(lms, w, h) {
+  const F = frontalize(lms, w, h);
+  const p = (i) => F[i];
+
+  const faceW = d2(p(L.cheekR), p(L.cheekL));
+  const faceH = d2(p(L.top), p(L.chin));
+  const jawW = d2(p(L.jawR), p(L.jawL));
+  const eyeWR = d2(p(L.eyeOutR), p(L.eyeInR));
+  const eyeWL = d2(p(L.eyeOutL), p(L.eyeInL));
+  const eyeW = (eyeWR + eyeWL) / 2;
+  const interEye = d2(p(L.eyeInR), p(L.eyeInL));
+  const eyeOpen = (d2(p(L.lidUpR), p(L.lidLoR)) + d2(p(L.lidUpL), p(L.lidLoL))) / 2 / eyeW;
+  const noseW = d2(p(L.alarR), p(L.alarL));
+  const mouthW = d2(p(L.mouthR), p(L.mouthL));
+
+  const browY = (p(L.browInR).y + p(L.browInL).y) / 2;
+  const stomionY = (p(L.lipUpIn).y + p(L.lipLoIn).y) / 2;
+  const midThird = browY - p(L.subnasale).y;
+  const lowThird = p(L.subnasale).y - p(L.chin).y;
+  const upperLip = p(L.subnasale).y - stomionY;
+  const chinPart = stomionY - p(L.chin).y;
+  const lipUp = Math.max(1e-6, p(L.lipTop).y - p(L.lipUpIn).y);
+  const lipLo = Math.max(1e-6, p(L.lipLoIn).y - p(L.lipBottom).y);
+
+  // Symmetry: mirror each left landmark across the facial midline and compare to its right twin.
+  const midX = MIDLINE.reduce((s, i) => s + p(i).x, 0) / MIDLINE.length;
+  let symErr = 0;
+  for (const [a, b] of SYM_PAIRS) {
+    const dx = (p(a).x - midX) + (p(b).x - midX);
+    const dy = p(a).y - p(b).y;
+    symErr += Math.hypot(dx, dy) / faceW;
+  }
+  symErr /= SYM_PAIRS.length;
+  const eyeSizeDiff = Math.abs(eyeWR - eyeWL) / eyeW;
+
+  // Head-pose check on raw 2D coordinates (nose tip should sit midway between cheeks).
+  const rx = (i) => lms[i].x * w;
+  const yawOffset = Math.abs((rx(L.noseTip) - rx(L.cheekR)) / (rx(L.cheekL) - rx(L.cheekR)) - 0.5);
+
+  const m = {
+    symErr, eyeSizeDiff,
+    interEyeRatio: interEye / eyeW,
+    noseRatio: noseW / interEye,
+    mouthNoseRatio: mouthW / noseW,
+    thirdsRatio: midThird / lowThird,
+    lowerFaceRatio: upperLip / chinPart,
+    lipRatio: lipLo / lipUp,
+    eyeFaceRatio: eyeW / faceW,
+    eyeOpen,
+    jawRatio: jawW / faceW,
+    aspect: faceH / faceW,
+    yawOffset,
+  };
+  return m;
+}
+
+// Ideals are calibrated to MediaPipe's canonical (average) face mesh plus real-photo
+// measurements, nudged toward classical proportions.
+function score(m) {
+  const s = {
+    sym: 0.75 * (100 * Math.exp(-((m.symErr / 0.025) ** 2))) + 0.25 * (100 * Math.exp(-((m.eyeSizeDiff / 0.12) ** 2))),
+    golden: (gauss(m.interEyeRatio, 1.38, 0.18) + gauss(m.noseRatio, 1.2, 0.3) + gauss(m.mouthNoseRatio, 1.45, 0.22)) / 3,
+    vertical: (gauss(m.thirdsRatio, 0.95, 0.22) * 2 + gauss(m.lowerFaceRatio, 0.45, 0.3) + gauss(m.lipRatio, 1.6, 0.45)) / 4,
+    // Larger eyes score higher up to a plateau.
+    eyes: (clamp(100 * (m.eyeFaceRatio - 0.14) / (0.19 - 0.14), 0, 100) * 0.6
+         + clamp(100 * (m.eyeOpen - 0.16) / (0.32 - 0.16), 0, 100) * 0.4),
+    line: (gauss(m.jawRatio, 0.75, 0.12) + gauss(m.aspect, 1.25, 0.15)) / 2,
+  };
+  for (const k in s) s[k] = clamp(s[k], 0, 100);
+
+  const total = 0.3 * s.sym + 0.2 * s.golden + 0.2 * s.vertical + 0.15 * s.eyes + 0.15 * s.line;
+  // Map the 0–100 composite to a deviation score (mean 50, SD 10) and soften the tails.
+  const raw = 50 + 10 * (total - 62) / 11;
+  const hensachi = Math.round((50 + 30 * Math.tanh((raw - 50) / 30)) * 10) / 10;
+
+  return { hensachi, total, s, m };
+}
+
+// Landmark detection isn't perfectly mirror-consistent, so average the measurements taken
+// on the original and the horizontally flipped image for a stable, side-independent score.
+function averageMeasures(list) {
+  const out = {};
+  for (const k in list[0]) out[k] = list.reduce((acc, m) => acc + m[k], 0) / list.length;
+  return out;
+}
+
+/* ---------------- Rendering ---------------- */
+function drawStage(showMesh) {
+  if (!currentImage) return;
+  const w = currentImage.width, h = currentImage.height;
+  // Once a face is found, zoom the preview to a square around it.
+  let sx = 0, sy = 0, sw = w, sh = h;
+  if (currentLandmarks) {
+    const xs = currentLandmarks.map((p) => p.x * w), ys = currentLandmarks.map((p) => p.y * h);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const side = Math.min(w, h, Math.max(x1 - x0, y1 - y0) * 1.7);
+    sx = clamp((x0 + x1) / 2 - side / 2, 0, w - side);
+    sy = clamp((y0 + y1) / 2 - side / 2, 0, h - side);
+    sw = sh = side;
+  }
+  const k = Math.min(1, 900 / Math.max(sw, sh)) * Math.max(1, 600 / Math.max(sw, sh));
+  canvas.width = Math.round(sw * k);
+  canvas.height = Math.round(sh * k);
+  ctx.drawImage(currentImage, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  if (!showMesh || !currentLandmarks) return;
+  const r = Math.max(1, canvas.width / 450);
+  const pt = (i) => [(currentLandmarks[i].x * w - sx) * k, (currentLandmarks[i].y * h - sy) * k];
+
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  for (let i = 0; i < currentLandmarks.length; i++) {
+    const [x, y] = pt(i);
+    ctx.beginPath(); ctx.arc(x, y, r * 0.9, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.lineWidth = r * 1.4;
+  ctx.setLineDash([r * 5, r * 4]);
+  // Midline
+  ctx.strokeStyle = "rgba(139,123,255,0.9)";
+  line(pt(L.top), pt(L.chin));
+  // Horizontal thirds at brow, nose base, chin
+  ctx.strokeStyle = "rgba(255,111,168,0.9)";
+  const [cx0] = pt(L.cheekR), [cx1] = pt(L.cheekL);
+  for (const y of [(pt(L.browInR)[1] + pt(L.browInL)[1]) / 2, pt(L.subnasale)[1], pt(L.chin)[1]]) {
+    line([cx0, y], [cx1, y]);
+  }
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#ff6fa8";
+  for (const i of [L.eyeOutR, L.eyeInR, L.eyeInL, L.eyeOutL, L.alarR, L.alarL, L.mouthR, L.mouthL, L.jawR, L.jawL, L.cheekR, L.cheekL]) {
+    const [x, y] = pt(i);
+    ctx.beginPath(); ctx.arc(x, y, r * 2.6, 0, Math.PI * 2); ctx.fill();
+  }
+}
+function line(a, b) { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+
+const CATS = [
+  ["sym", "左右対称性"],
+  ["golden", "黄金比バランス"],
+  ["vertical", "縦のバランス"],
+  ["eyes", "目元"],
+  ["line", "フェイスライン"],
+];
+
+function drawRadar(s, target = $("radar")) {
+  const c = target.getContext("2d");
+  const W = target.width, H = target.height;
+  c.clearRect(0, 0, W, H);
+  const cx = W / 2, cy = H / 2 + 14, R = Math.min(W, H) * 0.32;
+  const ang = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / CATS.length;
+  c.strokeStyle = "#3a3056"; c.lineWidth = 2;
+  for (let k = 1; k <= 4; k++) {
+    c.beginPath();
+    CATS.forEach((_, i) => {
+      const x = cx + Math.cos(ang(i)) * R * k / 4, y = cy + Math.sin(ang(i)) * R * k / 4;
+      i ? c.lineTo(x, y) : c.moveTo(x, y);
+    });
+    c.closePath(); c.stroke();
+  }
+  const grad = c.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
+  grad.addColorStop(0, "rgba(255,111,168,0.55)"); grad.addColorStop(1, "rgba(139,123,255,0.55)");
+  c.fillStyle = grad; c.strokeStyle = "#ff6fa8"; c.lineWidth = 4;
+  c.beginPath();
+  CATS.forEach(([k], i) => {
+    const v = Math.max(0.04, s[k] / 100);
+    const x = cx + Math.cos(ang(i)) * R * v, y = cy + Math.sin(ang(i)) * R * v;
+    i ? c.lineTo(x, y) : c.moveTo(x, y);
+  });
+  c.closePath(); c.fill(); c.stroke();
+  c.fillStyle = "#f1ecfa"; c.font = "bold 26px 'Hiragino Sans','Noto Sans JP',sans-serif";
+  c.textAlign = "center"; c.textBaseline = "middle";
+  CATS.forEach(([k, label], i) => {
+    const x = cx + Math.cos(ang(i)) * (R + 62), y = cy + Math.sin(ang(i)) * (R + 40);
+    c.fillText(label, x, y - 14);
+    c.fillStyle = "#a99cc4"; c.fillText(Math.round(s[k]), x, y + 16); c.fillStyle = "#f1ecfa";
+  });
+}
+
+function rankOf(h) {
+  if (h >= 72) return ["SSS", "芸能人・モデル級"];
+  if (h >= 67) return ["SS", "誰もが振り返る美形"];
+  if (h >= 62) return ["S", "かなりの美形"];
+  if (h >= 57) return ["A", "整った顔立ち"];
+  if (h >= 52) return ["B", "好印象な顔立ち"];
+  if (h >= 47) return ["C", "親しみやすいバランス"];
+  if (h >= 42) return ["D", "個性が光る顔立ち"];
+  return ["E", "唯一無二の個性派"];
+}
+
+// Standard normal CDF (Abramowitz–Stegun approximation).
+function normCdf(z) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989423 * Math.exp(-z * z / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return z > 0 ? 1 - p : p;
+}
+
+function buildComment(s) {
+  const entries = CATS.map(([k, label]) => ({ k, label, v: s[k] })).sort((a, b) => b.v - a.v);
+  const best = entries[0], worst = entries[entries.length - 1];
+  const praise = {
+    sym: "左右のバランスがとても良く、整った印象を与えます。",
+    golden: "目・鼻・口の横幅の比率が理想的な黄金比に近いです。",
+    vertical: "額〜鼻〜あごの縦のバランスが美しく整っています。",
+    eyes: "目元がはっきりしていて、印象に残りやすい顔立ちです。",
+    line: "フェイスラインがすっきりしていて、輪郭が魅力的です。",
+  };
+  const advice = {
+    sym: "表情のクセや撮影角度で左右差が出やすいので、正面からまっすぐ撮ると数値が伸びるかも。",
+    golden: "眉やメイク・ヘアスタイルでパーツの見え方の比率は調整しやすい項目です。",
+    vertical: "前髪の長さや分け方で縦のバランスの印象は大きく変わります。",
+    eyes: "リラックスして目をしっかり開けると、目元のスコアが上がりやすいです。",
+    line: "顎を軽く引いて撮影すると、フェイスラインがすっきり見えます。",
+  };
+  return `<strong>強み：${best.label}</strong><br>${praise[best.k]}<br><br>`
+    + `<strong>伸びしろ：${worst.label}</strong><br>${advice[worst.k]}`;
+}
+
+function showResult(res) {
+  lastResult = res;
+  $("placeholder").classList.add("hidden");
+  $("result").classList.remove("hidden");
+  const [grade, title] = rankOf(res.hensachi);
+  $("rank").textContent = `ランク ${grade}｜${title}`;
+  const top = Math.max(0.1, (1 - normCdf((res.hensachi - 50) / 10)) * 100);
+  $("percentile").textContent = `上位 約${top < 1 ? top.toFixed(1) : Math.round(top)}%`;
+
+  // Count-up animation
+  const el = $("score"), target = res.hensachi, t0 = performance.now();
+  const tick = (t) => {
+    const k = Math.min(1, (t - t0) / 1200), e = 1 - (1 - k) ** 3;
+    el.textContent = (25 + (target - 25) * e).toFixed(1);
+    if (k < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+
+  $("bars").innerHTML = CATS.map(([k, label]) => `
+    <div class="bar-row">
+      <div class="top"><span>${label}</span><span>${Math.round(res.s[k])}</span></div>
+      <div class="bar"><div data-w="${res.s[k]}"></div></div>
+    </div>`).join("");
+  requestAnimationFrame(() => document.querySelectorAll(".bar > div").forEach((b) => { b.style.width = b.dataset.w + "%"; }));
+
+  drawRadar(res.s);
+  if (window.matchMedia("(max-width: 760px)").matches) {
+    $("resultCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  $("comment").innerHTML = buildComment(res.s);
+
+  const warn = $("warn");
+  if (res.m.yawOffset > 0.08) {
+    warn.textContent = "⚠ 顔が少し横を向いているようです。正面からの写真のほうが正確に診断できます。";
+    warn.classList.remove("hidden");
+  } else {
+    warn.classList.add("hidden");
+  }
+
+  const m = res.m;
+  const rows = [
+    ["左右のズレ（顔幅比）", (m.symErr * 100).toFixed(2) + "%", "0%"],
+    ["目の間隔 ÷ 目の幅", m.interEyeRatio.toFixed(2), "1.38"],
+    ["鼻の幅 ÷ 目の間隔", m.noseRatio.toFixed(2), "1.20"],
+    ["口の幅 ÷ 鼻の幅", m.mouthNoseRatio.toFixed(2), "1.45"],
+    ["中顔面 ÷ 下顔面", m.thirdsRatio.toFixed(2), "0.95"],
+    ["鼻下〜口 ÷ 口〜あご", m.lowerFaceRatio.toFixed(2), "0.45"],
+    ["下唇 ÷ 上唇", m.lipRatio.toFixed(2), "1.60"],
+    ["目の幅 ÷ 顔幅", m.eyeFaceRatio.toFixed(3), "≥0.19"],
+    ["あご幅 ÷ 頬幅", m.jawRatio.toFixed(2), "0.75"],
+    ["顔の縦 ÷ 横", m.aspect.toFixed(2), "1.25"],
+  ];
+  $("detail").innerHTML = `<tr><td><b>項目</b></td><td><b>理想</b></td><td><b>あなた</b></td></tr>`
+    + rows.map(([a, b, c]) => `<tr><td>${a}</td><td>${c}</td><td>${b}</td></tr>`).join("");
+}
+
+/* ---------------- Flow ---------------- */
+function setBusy(on, text = "解析中…") {
+  $("busy").classList.toggle("hidden", !on);
+  $("busyText").textContent = text;
+}
+
+async function runOn(source) {
+  // Downscale large photos for speed; keep the canvas as the single source of truth.
+  const maxSide = 1280;
+  const sw = source.naturalWidth || source.videoWidth || source.width;
+  const sh = source.naturalHeight || source.videoHeight || source.height;
+  const k = Math.min(1, maxSide / Math.max(sw, sh));
+  const off = document.createElement("canvas");
+  off.width = Math.round(sw * k); off.height = Math.round(sh * k);
+  off.getContext("2d").drawImage(source, 0, 0, off.width, off.height);
+  currentImage = off;
+  currentLandmarks = null;
+  lastResult = null;
+  $("result").classList.add("hidden");
+  $("placeholder").classList.remove("hidden");
+
+  $("inputArea").classList.add("hidden");
+  $("cameraArea").classList.add("hidden");
+  $("previewArea").classList.remove("hidden");
+  drawStage(false);
+  setBusy(true, "AIモデルを読み込み中…");
+
+  try {
+    const landmarker = await getLandmarker();
+    setBusy(true, "顔のパーツを解析中…");
+    await new Promise((r) => setTimeout(r, 50));
+    const out = landmarker.detect(off);
+    if (!out.faceLandmarks || !out.faceLandmarks.length) {
+      setBusy(true, "顔が見つかりませんでした😢 別の写真をお試しください");
+      $("busy").querySelector(".spinner").classList.add("hidden");
+      $("busy").querySelector(".scanline").classList.add("hidden");
+      return;
+    }
+    currentLandmarks = out.faceLandmarks[0];
+    const measures = [measure(currentLandmarks, off.width, off.height)];
+    const flipped = document.createElement("canvas");
+    flipped.width = off.width; flipped.height = off.height;
+    const fctx = flipped.getContext("2d");
+    fctx.translate(off.width, 0); fctx.scale(-1, 1); fctx.drawImage(off, 0, 0);
+    const outFlip = landmarker.detect(flipped);
+    if (outFlip.faceLandmarks && outFlip.faceLandmarks.length) {
+      measures.push(measure(outFlip.faceLandmarks[0], off.width, off.height));
+    }
+    // Keep the scanning effect visible briefly so the result feels earned.
+    await new Promise((r) => setTimeout(r, 900));
+    setBusy(false);
+    drawStage($("meshToggle").checked);
+    showResult(score(averageMeasures(measures)));
+  } catch (e) {
+    console.error(e);
+    setBusy(true, "AIモデルの読み込みに失敗しました。通信環境を確認して再度お試しください。");
+    $("busy").querySelector(".spinner").classList.add("hidden");
+  }
+}
+
+function resetBusyVisuals() {
+  $("busy").querySelector(".spinner").classList.remove("hidden");
+  $("busy").querySelector(".scanline").classList.remove("hidden");
+}
+
+function loadFile(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  resetBusyVisuals();
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => { runOn(img); URL.revokeObjectURL(url); };
+  img.onerror = () => { alert("画像を読み込めませんでした。"); URL.revokeObjectURL(url); };
+  img.src = url;
+}
+
+$("fileInput").addEventListener("change", (e) => { loadFile(e.target.files[0]); e.target.value = ""; });
+const drop = $("drop");
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => loadFile(e.dataTransfer.files[0]));
+$("meshToggle").addEventListener("change", (e) => drawStage(e.target.checked));
+
+// Camera
+let stream = null;
+const video = $("video");
+function stopCamera() {
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = null;
+}
+$("cameraBtn").addEventListener("click", async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 } }, audio: false });
+    video.srcObject = stream;
+    video.style.transform = "scaleX(-1)";
+    await video.play();
+    $("inputArea").classList.add("hidden");
+    $("cameraArea").classList.remove("hidden");
+  } catch {
+    alert("カメラを起動できませんでした。ブラウザのカメラ許可を確認するか、写真を選択してください。");
+  }
+});
+$("shootBtn").addEventListener("click", () => {
+  const c = document.createElement("canvas");
+  c.width = video.videoWidth; c.height = video.videoHeight;
+  const cc = c.getContext("2d");
+  cc.translate(c.width, 0); cc.scale(-1, 1); // un-mirror selfie preview
+  cc.drawImage(video, 0, 0);
+  stopCamera();
+  resetBusyVisuals();
+  runOn(c);
+});
+$("cancelCamBtn").addEventListener("click", () => {
+  stopCamera();
+  $("cameraArea").classList.add("hidden");
+  $("inputArea").classList.remove("hidden");
+});
+$("retryBtn").addEventListener("click", () => {
+  currentImage = null; currentLandmarks = null;
+  $("previewArea").classList.add("hidden");
+  $("inputArea").classList.remove("hidden");
+  $("fileInput").click();
+});
+
+// Share
+$("shareBtn").addEventListener("click", () => {
+  if (!lastResult) return;
+  const [grade, title] = rankOf(lastResult.hensachi);
+  const text = `私の顔面偏差値は【${lastResult.hensachi.toFixed(1)}】でした！\nランク${grade}「${title}」\n#顔面偏差値診断`;
+  const url = location.href.split("#")[0];
+  window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, "_blank", "noopener");
+});
+
+// Save a result card image (no face photo included, for privacy).
+$("saveBtn").addEventListener("click", () => {
+  if (!lastResult) return;
+  const W = 1080, H = 1350;
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  const bg = g.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, "#2d1f4f"); bg.addColorStop(1, "#14101f");
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  g.textAlign = "center";
+  const font = (px, wt = "bold") => `${wt} ${px}px 'Hiragino Sans','Noto Sans JP',sans-serif`;
+  g.fillStyle = "#a99cc4"; g.font = font(40); g.fillText("顔面偏差値診断", W / 2, 110);
+  const tg = g.createLinearGradient(W / 2 - 250, 0, W / 2 + 250, 0);
+  tg.addColorStop(0, "#ff6fa8"); tg.addColorStop(1, "#8b7bff");
+  g.fillStyle = tg; g.font = font(220, "900"); g.fillText(lastResult.hensachi.toFixed(1), W / 2, 330);
+  const [grade, title] = rankOf(lastResult.hensachi);
+  g.fillStyle = "#f1ecfa"; g.font = font(52); g.fillText(`ランク ${grade}｜${title}`, W / 2, 420);
+  const r = document.createElement("canvas");
+  r.width = 640; r.height = 560;
+  drawRadar(lastResult.s, r);
+  g.drawImage(r, (W - 900) / 2, 470, 900, 787);
+  g.fillStyle = "#a99cc4"; g.font = font(28, "normal");
+  g.fillText("#顔面偏差値診断", W / 2, H - 40);
+  const a = document.createElement("a");
+  a.download = `face-score-${lastResult.hensachi.toFixed(1)}.png`;
+  a.href = c.toDataURL("image/png");
+  a.click();
+});
+</script>
+</body>
+</html>
